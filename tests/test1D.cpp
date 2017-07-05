@@ -4,11 +4,12 @@
 #include <typeinfo>
 #include <vector>
 #include <algorithm>
+#include <functional>
 
 #include "../../fidi/fidi.h"
 
 
-using namespace fivo;
+// using namespace fivo;
 
 // compile with:
 // 			clang++ -std=c++14 -I../ test1D.cpp -o test
@@ -82,8 +83,8 @@ int main(int argc, char * argv[]){
 	// define the domain data structure and connect neighbors
 	std::vector<CellT> cells(50);
 	for (auto i=1; i<49; i++){
-		cells1[i].setNeighborMin(0, cells1[i-1]);
-		cells1[i].setNeighborMax(0, cells1[i+1]);
+		cells[i].setNeighborMin(0, cells[i-1]);
+		cells[i].setNeighborMax(0, cells[i+1]);
 	}
 
 	// define the initial density
@@ -97,16 +98,9 @@ int main(int argc, char * argv[]){
 
 	// start time-stepping
 	for (auto t=0; t<200; t++){
-		for_each_update(++cells1.begin(), --cells1.end(), (dt,dx));
-		// if (t<19) cells1[25].Dz() = sin(2*pi*c0/(20*dx)*t*dt);
-		cells1[25].Dz() += exp(-(t-10)*(t-10)*c0/(20*dx)*dt*dt);
-		std::for_each(++cells1.begin(), --cells1.end(), UpdatePMLD<TEM>(dt,dx, conserved));
-		std::for_each(++cells1.begin(), --cells1.end(), ConstantUpdateE<TEM>(1));
-	
-		std::for_each(++cells1.begin(), --cells1.end(), YeeUpdateB<TEM>(dt,dx));
-		std::for_each(++cells1.begin(), --cells1.end(), UpdatePMLB<TEM>(dt,dx));
-		std::for_each(++cells1.begin(), --cells1.end(), ConstantUpdateH<TEM>(1));
-	
+		for_each_update(++cells.begin(), --cells.end(), ExplicitUpdate(dt,dx, conserved), ++soln.begin());
+		for_each_update(++soln.begin(), --soln.end(), [](double & d){}, ++cells.begin());
+
 		// std::cout << "n:" ;
 		for(auto i=0; i<50; i++) std::cout << ", " << cells[i].n() ;
 		std::cout << std::endl;
