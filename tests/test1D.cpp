@@ -26,17 +26,16 @@ struct SomeQuantity{
 
 template <std::size_t ndim, 
 		  typename CellT,
-		  typename SolutionIterator>
+		  typename SolutionIterator,
+		  class ConservedQuantityFunctor,
+		  class FaceFluxFunctor,
+		  class SourceFunctors...>
 struct ExplicitUpdate{
 	// SolutionIterator msit;
 	double mdt, mdx, mdtdx;
-	std::tuple<std::function<const double(CellT &)>, 
-		  	   std::function<const double(CellT &)>, 
-		  	   std::function<const double(CellT &)>...> mtpl;
+	std::tuple<ConservedQuantityFunctor, FaceFluxFunctor, SourceFunctors...> mtpl;
 
-	ExplicitUpdate(double dt, double dx, std::tuple<std::function<const double(CellT &)>, 
-		  	   std::function<const double(CellT &)>, 
-		  	   std::function<const double(CellT &)>...> tpl)
+	constexpr ExplicitUpdate(double dt, double dx, std::tuple<ConservedQuantityFunctor, FaceFluxFunctor, SourceFunctors...> tpl)
 	: mdt(dt)
 	, mdx(dx)
 	, mdtdx(dt/dx)
@@ -51,6 +50,21 @@ struct ExplicitUpdate{
 		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx;
 	}
 };
+
+
+template <std::size_t ndim,
+		  typename CellT,
+		  typename SolutionIterator,
+		  class ConservedQuantityFunctor,
+		  class FaceFluxFunctor,
+		  class SourceFunctors...>
+ExplicitUpdate<ndim,CellT,SolutionIterator,
+			   ConservedQuantityFunctor,
+			   FaceFluxFunctor,
+			   SourceFunctors...> make_explicit_update(double dt, double dx, ConservedQuantityFunctor cf, FaceFluxFunctor ff, SourceFunctors... sf){
+	return ExplicitUpdate(dt, dx, std::make_tuple(cf,ff,sf));
+};
+
 
 // create an update struct
 template <typename CellIterator, 
@@ -91,14 +105,17 @@ int main(int argc, char * argv[]){
 	for (auto i=20; i<30; i++) cells[i].n() = 1.0;
 
 	// define the conserved quantities 
-	std::tuple<std::function<const double(CellT &)>, std::function<const double(CellT &)>> 	conserved = {[](CellT & cl){return cl.n();}, [&c](CellT & cl){return cl.n()*c;}};
+	// std::tuple<std::function<const double(CellT &)>, std::function<const double(CellT &)>> 	conserved = {, };
 
 	// initialize a solution vector
 	std::vector<double> soln(ncells, 0.0);
 
+	// make the explicit update struct
+	auto exp_up = make_explicit_update(dt, dx, [](CellT & cl){return cl.n();}, [&c](CellT & cl){return cl.n()*c;});
+	
 	// start time-stepping
 	for (auto t=0; t<200; t++){
-		for_each_update(++cells.begin(), --cells.end(), ExplicitUpdate(dt,dx, conserved), ++soln.begin());
+		for_each_update(++cells.begin(), --cells.end(), exp_up, ++soln.begin());
 		for_each_update(++soln.begin(), --soln.end(), [](double & d){}, ++cells.begin());
 
 		// std::cout << "n:" ;
