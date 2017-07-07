@@ -131,8 +131,13 @@ int main(int argc, char * argv[]){
 	// make the explicit update struct
 	auto cons = [](const CellT & cl){return cl.n();};
 	auto flux = [&c](const CellT & cl){return c*cl.n();};
+
 	auto lax_fried = make_numerical_flux(cons, flux, -0.5*dx/dt, 0.5*dx/dt, 0.5, 0.5);
-	auto exp_up = make_explicit_update(dt, dx, cons, lax_fried);
+	auto exp_up_LF = make_explicit_update(dt, dx, cons, lax_fried);
+
+	auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
+	auto exp_up = make_explicit_update(dt, dx, cons, lax_wend);
+	
 	
 	// start time-stepping
 	for (auto t=0; t<20; t++){
