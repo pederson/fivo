@@ -14,6 +14,34 @@
 // compile with:
 // 			clang++ -std=c++14 -I../ test1D.cpp -o test
 
+
+
+namespace Detail{
+	// compile-time for_each on a tuple
+	template <typename TupleType, typename FunctionType>
+	void for_each(TupleType&&, FunctionType
+	            , std::integral_constant<std::size_t, std::tuple_size<typename std::remove_reference<TupleType>::type >::value>) {}
+
+	template <std::size_t I, typename TupleType, typename FunctionType
+	       , typename = typename std::enable_if<I!=std::tuple_size<typename std::remove_reference<TupleType>::type>::value>::type >
+	void for_each(TupleType&& t, FunctionType f, std::integral_constant<size_t, I>)
+	{
+	    f(std::get<I>(t));
+	    for_each(std::forward<TupleType>(t), f, std::integral_constant<size_t, I + 1>());
+	}
+
+	template <typename TupleType, typename FunctionType>
+	void for_each(TupleType&& t, FunctionType f)
+	{
+	    for_each(std::forward<TupleType>(t), f, std::integral_constant<size_t, 0>());
+	}
+}
+
+
+
+
+
+
 struct SomeQuantity{
 	double mN;
 
@@ -29,13 +57,15 @@ template <class ConservedQuantityFunctor,
 		  class... SourceFunctors>
 struct ExplicitUpdate{
 	double mdt, mdx, mdtdx;
-	std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor, SourceFunctors...> mtpl;
+	std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> mtpl;
+	std::tuple<SourceFunctors...> mstpl;
 
-	constexpr ExplicitUpdate(double dt, double dx, std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor, SourceFunctors...> tpl)
+	constexpr ExplicitUpdate(double dt, double dx, std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> tpl, std::tuple<SourceFunctors...> stpl)
 	: mdt(dt)
 	, mdx(dx)
 	, mdtdx(dt/dx)
-	, mtpl(tpl){};
+	, mtpl(tpl)
+	, mstpl(stpl){};
 
 	template <typename CellT>
 	double operator()(const CellT & cl){
@@ -44,7 +74,12 @@ struct ExplicitUpdate{
 		flx -= std::get<1>(mtpl).operator()(cl, cl.getNeighborMin(0));
 		flx += std::get<1>(mtpl).operator()(cl.getNeighborMax(0), cl);
 
-		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx;
+
+		double src=0.0;
+		Detail::for_each(mstpl, [&cl, &src](const auto & s){src += s.operator()(cl);});
+		// for (auto s=0; s<sizeof...(SourceFunctors); s++) src += std::get<2+s>(mtpl).operator()(cl);
+
+		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx + mdt*src;
 	}
 };
 
@@ -55,7 +90,7 @@ template <class ConservedQuantityFunctor,
 auto make_explicit_update(double dt, double dx, ConservedQuantityFunctor cf, NumericalFluxFunctor ff, SourceFunctors... sf){
 	return ExplicitUpdate<ConservedQuantityFunctor,
 			   			  NumericalFluxFunctor,
-			   			  SourceFunctors...>(dt, dx, std::make_tuple(cf,ff,sf...));
+			   			  SourceFunctors...>(dt, dx, std::make_tuple(cf,ff), std::make_tuple(sf...));
 };
 
 
@@ -97,15 +132,79 @@ void for_each_update(CellIterator first, CellIterator last, Functor f, SolutionI
 		(*soln) = f.operator()(*it);
 		soln++;
 	}
+
+	// for (auto it=first; it!=last; it++){
+	// 	f.operator()(*it) = *soln;
+	// 	soln++;
+	// }
 }
+
+
+
+
+
+
+
+
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class... SourceFunctors>
+struct LaxWendroff{
+	double mdt, mdx, mdtdx;
+	std::tuple<ConservedQuantityFunctor, FluxFunctor> mtpl;
+	std::tuple<SourceFunctors...> mstpl;
+
+	constexpr LaxWendroff(double dt, double dx, std::tuple<ConservedQuantityFunctor, FluxFunctor> tpl, std::tuple<SourceFunctors...> stpl)
+	: mdt(dt)
+	, mdx(dx)
+	, mdtdx(dt/dx)
+	, mtpl(tpl)
+	, mstpl(stpl){};
+
+	template <typename CellT>
+	double operator()(const CellT & cl){
+		double flx=0.0;
+
+		double nr = 0.5*(std::get<0>(mtpl).operator()(cl) + std::get<0>(mtpl).operator()(cl.getNeighborMax(0))) 
+				  - mdtdx*0.5*(std::get<1>(mtpl).operator()(cl.getNeighborMax(0)) - std::get<1>(mtpl).operator()(cl));
+		double nl = 0.5*(std::get<0>(mtpl).operator()(cl) + std::get<0>(mtpl).operator()(cl.getNeighborMin(0))) 
+				  - mdtdx*0.5*(std::get<1>(mtpl).operator()(cl) - std::get<1>(mtpl).operator()(cl.getNeighborMin(0)));
+
+		// flux in
+		flx += std::get<1>(mtpl).operator()(nl);
+
+		// flux out
+		flx -= std::get<1>(mtpl).operator()(nr);
+
+		// flx -= std::get<1>(mtpl).operator()(cl, cl.getNeighborMin(0));
+		// flx += std::get<1>(mtpl).operator()(cl.getNeighborMax(0), cl);
+
+		double src=0.0;
+		Detail::for_each(mstpl, [&cl, &src](const auto & s){src += s.operator()(cl);});
+
+		return std::get<0>(mtpl).operator()(cl) + mdtdx*flx + mdt*src;
+	}
+};
+
+
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class... SourceFunctors>
+auto make_lax_wendroff(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff, SourceFunctors... sf){
+	return LaxWendroff<ConservedQuantityFunctor,
+			   			  FluxFunctor,
+			   			  SourceFunctors...>(dt, dx, std::make_tuple(cf,ff), std::make_tuple(sf...));
+};
 
 
 int main(int argc, char * argv[]){
 
-	std::size_t ncells = 50;
+	std::size_t ncells = 100;
 
 	// time-stepping parameters
-	const double c 	= 1.0;								// velocity [m/s]
+	const double c 	= -1.0;								// velocity [m/s]
 	const double cfl = 0.5;								// cfl number
 	const double dx = 1.0/static_cast<double>(ncells);	// cell size [m]
 	const double dt = cfl*dx/std::fabs(c);							// time step [s]
@@ -132,18 +231,27 @@ int main(int argc, char * argv[]){
 	auto cons = [](const CellT & cl){return cl.n();};
 	auto flux = [&c](const CellT & cl){return c*cl.n();};
 
-	auto lax_fried = make_numerical_flux(cons, flux, -0.5*dx/dt, 0.5*dx/dt, 0.5, 0.5);
+	struct FluxGetter{
+		double mC;
+
+		FluxGetter(double c): mC(c){};
+		double operator()(const CellT & cl){return mC*cl.n();};
+		double operator()(double n){return mC*n;};
+	};
+
+	// auto lax_fried = make_numerical_flux(cons, flux, -0.5*dx/dt, 0.5*dx/dt, 0.5, 0.5);
 	// auto exp_up = make_explicit_update(dt, dx, cons, lax_fried);
 
-	auto lax = make_numerical_flux(cons, flux, 0.5, 0.5, -0.5*dt/dx, 0.5*dt/dx);
-	auto exp_up = make_explicit_update(dt, dx, cons, [&c, &lax](const CellT & cl, const CellT & neighb){return c*lax.operator()(cl, neighb);});
+	// auto lax = make_numerical_flux(cons, flux, 0.5, 0.5, -0.5*dt/dx, 0.5*dt/dx);
+	// auto exp_up = make_explicit_update(dt, dx, cons, [&c, &lax](const CellT & cl, const CellT & neighb){return c*lax.operator()(cl, neighb);});
 	// auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
 	// auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
 	// auto exp_up = make_explicit_update(dt, dx, cons, lax_wend);
 	
+	auto exp_up = make_lax_wendroff(dt, dx, cons, FluxGetter(c));
 	
 	// start time-stepping
-	for (auto t=0; t<20; t++){
+	for (auto t=0; t<50; t++){
 		for_each_update(++cells.begin(), --cells.end(), exp_up, ++soln.begin());
 		for(auto i=0; i<ncells; i++) cells[i].n() = soln[i];
 		// for_each_update(++soln.begin(), --soln.end(), [](double & d){}, ++cells.begin());
