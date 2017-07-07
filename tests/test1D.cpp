@@ -52,46 +52,55 @@ struct SomeQuantity{
 };
 
 
+
 template <class ConservedQuantityFunctor,
-		  class NumericalFluxFunctor,
+		  class NumericalFluxInFunctor,
+		  class NumericalFluxOutFunctor,
 		  class... SourceFunctors>
 struct ExplicitUpdate{
 	double mdt, mdx, mdtdx;
-	std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> mtpl;
+	ConservedQuantityFunctor mcf;
+	NumericalFluxInFunctor mfif;
+	NumericalFluxOutFunctor mfof;
 	std::tuple<SourceFunctors...> mstpl;
 
-	constexpr ExplicitUpdate(double dt, double dx, std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> tpl, std::tuple<SourceFunctors...> stpl)
+	constexpr ExplicitUpdate(double dt, double dx, ConservedQuantityFunctor cf, NumericalFluxInFunctor fif, NumericalFluxOutFunctor fof, std::tuple<SourceFunctors...> stpl)
 	: mdt(dt)
 	, mdx(dx)
 	, mdtdx(dt/dx)
-	, mtpl(tpl)
+	, mcf(cf)
+	, mfif(fif)
+	, mfof(fof)
 	, mstpl(stpl){};
 
 	template <typename CellT>
 	double operator()(const CellT & cl){
 		double flx=0.0;
+		// flux in
+		flx += mfif.operator()(cl);
+		// flux out	
+		flx -= mfof.operator()(cl);
 
-		flx -= std::get<1>(mtpl).operator()(cl, cl.getNeighborMin(0));
-		flx += std::get<1>(mtpl).operator()(cl.getNeighborMax(0), cl);
-
-
+		// sources
 		double src=0.0;
 		Detail::for_each(mstpl, [&cl, &src](const auto & s){src += s.operator()(cl);});
-		// for (auto s=0; s<sizeof...(SourceFunctors); s++) src += std::get<2+s>(mtpl).operator()(cl);
 
-		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx + mdt*src;
+		return mcf.operator()(cl) + mdtdx*flx + mdt*src;
 	}
 };
 
 
 template <class ConservedQuantityFunctor,
-		  class NumericalFluxFunctor,
+		  class NumericalFluxInFunctor,
+		  class NumericalFluxOutFunctor,
 		  class... SourceFunctors>
-auto make_explicit_update(double dt, double dx, ConservedQuantityFunctor cf, NumericalFluxFunctor ff, SourceFunctors... sf){
+auto make_explicit_update(double dt, double dx, ConservedQuantityFunctor cf, NumericalFluxInFunctor fif, NumericalFluxOutFunctor fof, SourceFunctors... sf){
 	return ExplicitUpdate<ConservedQuantityFunctor,
-			   			  NumericalFluxFunctor,
-			   			  SourceFunctors...>(dt, dx, std::make_tuple(cf,ff), std::make_tuple(sf...));
-};
+						  NumericalFluxInFunctor,
+						  NumericalFluxOutFunctor,
+						  SourceFunctors...>(dt, dx, cf, fif, fof, std::make_tuple(sf...));
+}
+
 
 
 template <class ConservedQuantityFunctor, 
@@ -122,6 +131,102 @@ auto make_numerical_flux(ConservedQuantityFunctor cf, FluxFunctor ff, double Cc,
 }
 
 
+
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class NeighborGetter>
+struct LaxFriedrichsFluxIn : public NumericalFlux<ConservedQuantityFunctor, FluxFunctor>{
+	typedef NumericalFlux<ConservedQuantityFunctor, FluxFunctor> 		NumFlux;
+	NeighborGetter mng;
+
+	LaxFriedrichsFluxIn(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff, NeighborGetter ng)
+	: NumericalFlux<ConservedQuantityFunctor, FluxFunctor>(cf, ff, 0.5, 0.5, -0.5*dt/dx, 0.5*dt/dx)
+	, mng(ng) {};
+
+	template <typename CellT>
+	double operator()(const CellT & cl){return NumFlux::operator()(cl, mng.operator()(cl));};
+};
+
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class NeighborGetter>
+auto make_lax_friedrichs_in(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff, NeighborGetter ng){
+	return LaxFriedrichsFluxIn<ConservedQuantityFunctor, FluxFunctor, NeighborGetter>(dt, dx, cf, ff, ng);
+}
+
+
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class NeighborGetter>
+struct LaxFriedrichsFluxOut : public NumericalFlux<ConservedQuantityFunctor, FluxFunctor>{
+	typedef NumericalFlux<ConservedQuantityFunctor, FluxFunctor> 		NumFlux;
+	NeighborGetter mng;
+
+	LaxFriedrichsFluxOut(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff, NeighborGetter ng)
+	: NumericalFlux<ConservedQuantityFunctor, FluxFunctor>(cf, ff, 0.5, 0.5, 0.5*dt/dx, -0.5*dt/dx)
+	, mng(ng) {};
+
+	template <typename CellT>
+	double operator()(const CellT & cl){return NumFlux::operator()(cl, mng.operator()(cl));};
+};
+
+template <class ConservedQuantityFunctor,
+		  class FluxFunctor,
+		  class NeighborGetter>
+auto make_lax_friedrichs_out(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff, NeighborGetter ng){
+	return LaxFriedrichsFluxOut<ConservedQuantityFunctor, FluxFunctor, NeighborGetter>(dt, dx, cf, ff, ng);
+}
+
+
+
+// template <class ConservedQuantityFunctor,
+// 		  class NumericalFluxFunctor,
+// 		  class... SourceFunctors>
+// struct ExplicitUpdate{
+// 	double mdt, mdx, mdtdx;
+// 	std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> mtpl;
+// 	std::tuple<SourceFunctors...> mstpl;
+
+// 	constexpr ExplicitUpdate(double dt, double dx, std::tuple<ConservedQuantityFunctor, NumericalFluxFunctor> tpl, std::tuple<SourceFunctors...> stpl)
+// 	: mdt(dt)
+// 	, mdx(dx)
+// 	, mdtdx(dt/dx)
+// 	, mtpl(tpl)
+// 	, mstpl(stpl){};
+
+// 	template <typename CellT>
+// 	double operator()(const CellT & cl){
+// 		double flx=0.0;
+
+// 		flx -= std::get<1>(mtpl).operator()(cl, cl.getNeighborMin(0));
+// 		flx += std::get<1>(mtpl).operator()(cl.getNeighborMax(0), cl);
+
+
+// 		double src=0.0;
+// 		Detail::for_each(mstpl, [&cl, &src](const auto & s){src += s.operator()(cl);});
+// 		// for (auto s=0; s<sizeof...(SourceFunctors); s++) src += std::get<2+s>(mtpl).operator()(cl);
+
+// 		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx + mdt*src;
+// 	}
+// };
+
+
+// template <class ConservedQuantityFunctor,
+// 		  class NumericalFluxFunctor,
+// 		  class... SourceFunctors>
+// auto make_explicit_update(double dt, double dx, ConservedQuantityFunctor cf, NumericalFluxFunctor ff, SourceFunctors... sf){
+// 	return ExplicitUpdate<ConservedQuantityFunctor,
+// 			   			  NumericalFluxFunctor,
+// 			   			  SourceFunctors...>(dt, dx, std::make_tuple(cf,ff), std::make_tuple(sf...));
+// };
+
+
+
+
+
 // create an update struct
 template <typename CellIterator, 
 		  typename SolutionIterator, 
@@ -132,11 +237,6 @@ void for_each_update(CellIterator first, CellIterator last, Functor f, SolutionI
 		(*soln) = f.operator()(*it);
 		soln++;
 	}
-
-	// for (auto it=first; it!=last; it++){
-	// 	f.operator()(*it) = *soln;
-	// 	soln++;
-	// }
 }
 
 
@@ -204,7 +304,7 @@ int main(int argc, char * argv[]){
 	std::size_t ncells = 100;
 
 	// time-stepping parameters
-	const double c 	= -1.0;								// velocity [m/s]
+	const double c 	= 1.0;								// velocity [m/s]
 	const double cfl = 0.5;								// cfl number
 	const double dx = 1.0/static_cast<double>(ncells);	// cell size [m]
 	const double dt = cfl*dx/std::fabs(c);							// time step [s]
@@ -238,6 +338,10 @@ int main(int argc, char * argv[]){
 		double operator()(const CellT & cl){return mC*cl.n();};
 		double operator()(double n){return mC*n;};
 	};
+
+	auto lax_fried = make_explicit_update(dt, dx, cons, 
+										  make_lax_friedrichs_in( dt, dx, cons, FluxGetter(c), [](const CellT & cl){return cl.getNeighborMin(0);}),
+										  make_lax_friedrichs_out(dt, dx, cons, FluxGetter(c), [](const CellT & cl){return cl.getNeighborMax(0);}));
 
 	// auto lax_fried = make_numerical_flux(cons, flux, -0.5*dx/dt, 0.5*dx/dt, 0.5, 0.5);
 	// auto exp_up = make_explicit_update(dt, dx, cons, lax_fried);
