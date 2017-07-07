@@ -133,10 +133,13 @@ int main(int argc, char * argv[]){
 	auto flux = [&c](const CellT & cl){return c*cl.n();};
 
 	auto lax_fried = make_numerical_flux(cons, flux, -0.5*dx/dt, 0.5*dx/dt, 0.5, 0.5);
-	auto exp_up_LF = make_explicit_update(dt, dx, cons, lax_fried);
+	// auto exp_up = make_explicit_update(dt, dx, cons, lax_fried);
 
-	auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
-	auto exp_up = make_explicit_update(dt, dx, cons, lax_wend);
+	auto lax = make_numerical_flux(cons, flux, 0.5, 0.5, -0.5*dt/dx, 0.5*dt/dx);
+	auto exp_up = make_explicit_update(dt, dx, cons, [&c, &lax](const CellT & cl, const CellT & neighb){return c*lax.operator()(cl, neighb);});
+	// auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
+	// auto lax_wend = [&c, &exp_up_LF](const CellT & cl, const CellT & neighb){return c*exp_up_LF.operator()(cl);};
+	// auto exp_up = make_explicit_update(dt, dx, cons, lax_wend);
 	
 	
 	// start time-stepping
