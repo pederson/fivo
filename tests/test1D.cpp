@@ -264,7 +264,7 @@ struct LaxWendroff{
 
 	template <typename CellT>
 	double operator()(const CellT & cl){
-		double flx=0.0;
+		double flx = 0.0;
 
 		double nr = 0.5*(std::get<0>(mtpl).operator()(cl) + std::get<0>(mtpl).operator()(cl.getNeighborMax(0))) 
 				  - mdtdx*0.5*(std::get<1>(mtpl).operator()(cl.getNeighborMax(0)) - std::get<1>(mtpl).operator()(cl));
@@ -272,18 +272,16 @@ struct LaxWendroff{
 				  - mdtdx*0.5*(std::get<1>(mtpl).operator()(cl) - std::get<1>(mtpl).operator()(cl.getNeighborMin(0)));
 
 		// flux in
-		flx += std::get<1>(mtpl).operator()(nl);
+		flx -= std::get<1>(mtpl).operator()(nl);
 
 		// flux out
-		flx -= std::get<1>(mtpl).operator()(nr);
+		flx += std::get<1>(mtpl).operator()(nr);
 
-		// flx -= std::get<1>(mtpl).operator()(cl, cl.getNeighborMin(0));
-		// flx += std::get<1>(mtpl).operator()(cl.getNeighborMax(0), cl);
-
+		// add up all the source terms
 		double src=0.0;
 		Detail::for_each(mstpl, [&cl, &src](const auto & s){src += s.operator()(cl);});
 
-		return std::get<0>(mtpl).operator()(cl) + mdtdx*flx + mdt*src;
+		return std::get<0>(mtpl).operator()(cl) - mdtdx*flx + mdt*src;
 	}
 };
 
@@ -304,7 +302,7 @@ int main(int argc, char * argv[]){
 	std::size_t ncells = 100;
 
 	// time-stepping parameters
-	const double c 	= 1.0;								// velocity [m/s]
+	const double c 	= -1.0;								// velocity [m/s]
 	const double cfl = 0.5;								// cfl number
 	const double dx = 1.0/static_cast<double>(ncells);	// cell size [m]
 	const double dt = cfl*dx/std::fabs(c);							// time step [s]
@@ -322,7 +320,11 @@ int main(int argc, char * argv[]){
 	}
 
 	// define the initial density
-	for (auto i=20; i<30; i++) cells[i].n() = 1.0-std::fabs(i-25)/5.0;
+	// for (auto i=0; i<ncells; i++) cells[i].n() = 0.5;
+	// for (auto i=ncells/2; i<ncells; i++) cells[i].n() = 0.0;
+	// for (auto i=0; i<5; i++) cells[i+ncells/2].n() = 0.5-std::fabs(i-5)/10.0;
+	// for (auto i=20; i<30; i++) cells[i].n() = 1.0-std::fabs(i-25)/5.0;
+	for (auto i=0; i<ncells; i++) cells[i].n() = exp(-static_cast<double>((i-ncells/2)*(i-ncells/2))/(2.0*10.0*10.0));
 
 	// initialize a solution vector
 	std::vector<double> soln(ncells, 0.0);
