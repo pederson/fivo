@@ -303,32 +303,6 @@ int main(int argc, char * argv[]){
 	};
 
 
-
-
-
-
-	// template <class FluxType,
-	// 		  class ConservedQuantityFunctor,
-	// 		  class FluxFunctor>
-	// struct StencilFluxLW{
-	// 	FluxType fl, fr, fu, fd;
-
-	// 	StencilFluxLW(double dt, double dx, ConservedQuantityFunctor cf, FluxFunctor ff){
-	// 		fl = make_lax_wendroff_two_cell(dt, dx, [](auto & c, auto & n){return ;} cf, ff)
-	// 	}
-
-	// 	template <typename CellT>
-	// 	double operator()(const CellT & c){
-	// 		double flx = 0.0;
-	// 		flx += 
-	// 	}
-	// };
-
-
-
-
-
-
 	auto diffusive = make_diffusive_flux(dt, dx, cons, [](auto & c){return c.D();});
 	auto exp_up = make_explicit_update(dt, cons, diffusive);
 	
